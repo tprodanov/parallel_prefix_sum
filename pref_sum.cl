@@ -1,8 +1,6 @@
-
-
 void input_to_local(global float const* input, size_t n, local float* loc_mem) {
     size_t id = get_global_id(0);
-    size_t work_items = get_global_size();
+    size_t work_items = get_global_size(0);
 
     size_t wi_part = ceil(n * 1.0f / work_items);
     size_t i;
@@ -16,10 +14,10 @@ void input_to_local(global float const* input, size_t n, local float* loc_mem) {
 
 void to_root(global float const* input, size_t n, local float* loc_mem) {
     size_t id = get_global_id(0);
-    size_t work_items = get_global_size();
-    size_t log_work_items = static_cast<size_t>(log2(work_items))
+    size_t work_items = get_global_size(0);
+    size_t log_work_items = log2((float)work_items);
 
-    size_t m = ceil(log2(n));
+    size_t m = ceil(log2((float)n));
     size_t chunk = 1 << m;
     size_t offset = 0;
     size_t wi_part = chunk / work_items;
@@ -46,12 +44,12 @@ void to_root(global float const* input, size_t n, local float* loc_mem) {
 
 void from_root(global float const* input, size_t n, local float* loc_mem) {
     size_t id = get_global_id(0);
-    size_t work_items = get_global_size();
-    size_t log_work_items = static_cast<size_t>(log2(work_items))
+    size_t work_items = get_global_size(0);
+    size_t log_work_items = log2((float)work_items);
 
-    size_t m = ceil(log2(n));
+    size_t m = ceil(log2((float)n));
     size_t chunk = work_items;
-    size_t offset = (1 << m + 1) - 2 * work_items - 1;
+    size_t offset = (1 << (m + 1)) - 2 * work_items - 1;
     size_t wi_part = 1;
 
     for (size_t d = log_work_items; d < m; ++d) {
@@ -69,7 +67,7 @@ void from_root(global float const* input, size_t n, local float* loc_mem) {
 
 void local_to_output(size_t n, local float* loc_mem, global float* output) {
     size_t id = get_global_id(0);
-    size_t work_items = get_global_size();
+    size_t work_items = get_global_size(0);
 
     size_t wi_part = ceil(n * 1.0f / work_items);
     size_t i;
@@ -80,19 +78,19 @@ void local_to_output(size_t n, local float* loc_mem, global float* output) {
 
 void kernel prefix_sum(global float const* input, size_t n,
                        local float* loc_mem, global float* output) {
-    printf("Prefix sum\n");
-    printf("Work items: %d\n", get_global_size());
-    printf("Work id:    %d\n", get_global_id());
-
-    printf("Input to local\n");
+    // printf("Prefix sum\n");
+    // printf("Work items: %d\n", get_global_size(0));
+    // printf("Work id:    %d\n", get_global_id(0));
+    //
+    // printf("Input to local\n");
     input_to_local(input, n, loc_mem);
-    printf("To root\n");
+    // printf("To root\n");
     to_root(input, n, loc_mem);
-    printf("Barrier\n");
+    // printf("Barrier\n");
     barrier(CLK_LOCAL_MEM_FENCE);
-    printf("From root\n");
+    // printf("From root\n");
     from_root(input, n, loc_mem);
-    printf("Local to output\n");
+    // printf("Local to output\n");
     local_to_output(n, loc_mem, output);
-    printf("Success\n");
+    // printf("Success\n");
 }

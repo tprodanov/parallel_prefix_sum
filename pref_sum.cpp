@@ -35,7 +35,7 @@ std::string load_kernel(std::string const& filename) {
     while (kernel_file) {
         std::string tmp;
         getline(kernel_file, tmp);
-        kernel_code += tmp;
+        kernel_code += tmp + "\n";
     }
     return kernel_code;
 }
