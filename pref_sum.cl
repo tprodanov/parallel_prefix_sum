@@ -1,10 +1,6 @@
 #include <cmath>
 #include <iostream>
 
-size_t get_work_items() {
-    static size_t work_items
-}
-
 void input_to_local(global float const* input, size_t n, local float* loc_mem) {
     size_t id = get_global_id(0);
     size_t work_items = get_global_size();

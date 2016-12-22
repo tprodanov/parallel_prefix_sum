@@ -5,7 +5,7 @@
 
 #include <CL/cl.hpp>
 
-const size_t work_items = 256;
+const size_t work_items = 2;
 
 void initialize(cl::Platform& default_platform, cl::Device& default_device) {
     std::vector<cl::Platform> all_platforms;
@@ -52,7 +52,7 @@ int main() {
 
     cl::Program program(context, sources);
     if (program.build({default_device}) != CL_SUCCESS) {
-        stdLLcerr << "Error building:\n" << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(default_device) << std::endl;
+        std::cerr << "Error building:\n" << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(default_device) << std::endl;
         exit(1);
     }
 
@@ -64,7 +64,7 @@ int main() {
         fin >> inp_arr[i];
 
     size_t buff_size = sizeof(float) * n;
-    cl::Buffer buffer_in(context, CL_MEM_READ_ONLY, buff_size;
+    cl::Buffer buffer_in(context, CL_MEM_READ_ONLY, buff_size);
     cl::Buffer buffer_out(context, CL_MEM_READ_WRITE, buff_size);
 
     cl::CommandQueue queue(context, default_device);
@@ -72,10 +72,10 @@ int main() {
 
     cl::Kernel kernel(program, "prefix_sum");
     cl::make_kernel<cl::Buffer&, size_t, cl::LocalSpaceArg, cl::Buffer&> prefix_sum(kernel);
-    cl::EnqueueArgs eargs(queue, cl::NullRange, cl::NDRange(work_items), cl::NDRange(1));
 
-    size_t local_memory_size = (1 << static_cast<size_t>(std::ceil(std::log2(work_items))) + 1) - work_items;
-    prefix_sum(eargs, buffer_in, n, sizeof(float) * local_memory_size, buffer_out).wait();
+    cl::EnqueueArgs eargs(queue, cl::NullRange, cl::NDRange(work_items), cl::NDRange(1));
+    size_t local_memory_size = sizeof(float) * ((1 << static_cast<size_t>(std::ceil(std::log2(work_items))) + 1) - work_items);
+    prefix_sum(eargs, buffer_in, n, cl::Local(local_memory_size), buffer_out).wait();
 
     float* outp_arr = new float[n];
     queue.enqueueReadBuffer(buffer_out, CL_TRUE, 0, buff_size, outp_arr);
