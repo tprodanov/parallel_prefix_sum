@@ -1,116 +1,86 @@
+
+size_t calculate_wg_part(size_t n) {
+    size_t work_groups = get_global_size(0);
+    size_t m = max(work_groups, (size_t)(1 << (size_t)ceil(log2((float)n))));
+    return m / work_groups;
+}
+
 void input_to_local(global float const* input, size_t n, local float* loc_mem) {
     size_t id = get_global_id(0);
-    size_t work_items = get_global_size(0);
+    size_t wg_part = calculate_wg_part(n);
 
-    size_t m = 1 << (size_t)ceil(log2((float)n));
-    size_t wi_part = m / work_items;
-
-    size_t i = wi_part * id;
-    for ( ; i < wi_part * (id + 1) && i < n; ++i) {
-        loc_mem[i] = input[i];
+    size_t i = wg_part * id;
+    for ( ; i < wg_part * (id + 1) && i < n; ++i) {
+        loc_mem[i % wg_part] = input[i];
     }
-    for ( ; i < wi_part * (id + 1); ++i) {
-        loc_mem[i] = 0.0f;
+    for ( ; i < wg_part * (id + 1); ++i) {
+        loc_mem[i % wg_part] = 0.0f;
     }
 }
 
-void to_root(size_t n, local float* loc_mem) {
-    size_t id = get_global_id(0);
-    size_t work_items = get_global_size(0);
-    size_t log_work_items = log2((float)work_items);
-
-    size_t m = ceil(log2((float)n));
-    size_t chunk = 1 << m;
+void reduce(size_t wg_part, local float* loc_mem) {
     size_t offset = 0;
-    size_t wi_part = chunk / work_items;
-
-    for (size_t d = m - 1; d >= log_work_items; --d) {
+    while (wg_part > 1) {
         size_t prev_offset = offset;
-        offset += chunk;
-        chunk /= 2;
-        wi_part /= 2;
+        offset += wg_part;
+        wg_part /= 2;
 
-        for (size_t i = wi_part * id; i < wi_part * (id + 1); ++i) {
+        for (size_t i = 0; i < wg_part; ++i) {
             loc_mem[offset + i] = loc_mem[prev_offset + 2 * i] + loc_mem[prev_offset + 2 * i + 1];
         }
     }
 }
 
-void sum_last_row(size_t n, local float* loc_mem) {
-    if (get_global_id(0) != 0)
-        return;
-
-    size_t work_items = get_global_size(0);
-    size_t m = ceil(log2((float)n));
-    size_t offset = (1 << (m + 1)) - 2 * work_items;
-
-    for (size_t i = 1; i < work_items; ++i)
-        loc_mem[offset + i] += loc_mem[offset + i - 1];
-    for (size_t i = 1; i < work_items; ++i)
-        loc_mem[offset + i] = loc_mem[offset + i - 1];
-    loc_mem[offset] = 0;
+void last_row_to_output(size_t wg_part, local float* loc_mem, global float* output) {
+    size_t id = get_global_id(0);
+    output[id] = loc_mem[2 * wg_part - 2];
 }
 
-void from_root(size_t n, local float* loc_mem) {
+void last_row_to_local(size_t wg_part, local float* loc_mem, global float const* input) {
     size_t id = get_global_id(0);
-    size_t work_items = get_global_size(0);
-    size_t log_work_items = log2((float)work_items);
+    loc_mem[2 * wg_part - 2] = input[id];;
+}
 
-    size_t m = ceil(log2((float)n));
-    size_t chunk = work_items;
-    size_t offset = (1 << (m + 1)) - 2 * work_items;
-    size_t wi_part = 1;
+void downsweep(size_t wg_part, local float* loc_mem) {
+    size_t id = get_global_id(0);
+    size_t chunk = 1;
+    size_t offset = 2 * wg_part - 2;
 
-    for (size_t d = log_work_items; d < m; ++d) {
+    while (chunk != wg_part) {
         size_t prev_offset = offset;
-        chunk *= 2;
-        offset -= chunk;
-        wi_part *= 2;
+        offset -= 2 * chunk;
 
-        for (size_t i = wi_part * id; i < wi_part * (id + 1); ++i) {
+        for (size_t i = 0; i < chunk; ++i) {
             loc_mem[offset + 2 * i + 1] = loc_mem[prev_offset + i] + loc_mem[offset + 2 * i];
             loc_mem[offset + 2 * i] = loc_mem[prev_offset + i];
         }
+        chunk *= 2;
     }
 }
 
 void local_to_output(size_t n, local float* loc_mem, global float* output) {
     size_t id = get_global_id(0);
-    size_t work_items = get_global_size(0);
+    size_t wg_part = calculate_wg_part(n);
 
-    size_t wi_part = ceil(n * 1.0f / work_items);
-    size_t i;
-    for (i = wi_part * id; i < wi_part * (id + 1) && i < n; ++i) {
-        output[i] = loc_mem[i];
+    for (size_t i = wg_part * id; i < wg_part * (id + 1) && i < n; ++i) {
+        output[i] = loc_mem[i % wg_part];
     }
 }
 
-void temp_output(size_t n, local float* loc_mem, global float* output) {
-    if (get_global_id(0) != 0)
-        return;
-    for (size_t i = 0; i < n; ++i)
-        output[i] = loc_mem[i];
+void kernel first_stage(global float const* input, size_t n,
+                        local float* loc_mem, global float* outp_last_row) {
+    input_to_local(input, n, loc_mem);
+    size_t wg_part = calculate_wg_part(n);
+    reduce(wg_part, loc_mem);
+    last_row_to_output(wg_part, loc_mem, outp_last_row);
 }
 
-void kernel prefix_sum(global float const* input, size_t n,
-                       local float* loc_mem, global float* output) {
-    printf("%d %d ; %d %d\n", get_global_size(0), get_global_id(0), get_local_size(0), get_local_id(0));
-
+void kernel second_stage(global float const* input, global float const* inp_last_row,
+                         size_t n, local float* loc_mem, global float* output) {
     input_to_local(input, n, loc_mem);
-
-    barrier(CLK_LOCAL_MEM_FENCE);
-    local_to_output(n, loc_mem, output);
-    barrier(CLK_LOCAL_MEM_FENCE);
-    return;
-
-    to_root(n, loc_mem);
-
-    printf(">>>>>>>");
-    barrier(CLK_LOCAL_MEM_FENCE);
-    printf("<<<<<<<");
-    sum_last_row(n, loc_mem);
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    from_root(n, loc_mem);
+    size_t wg_part = calculate_wg_part(n);
+    reduce(wg_part, loc_mem);
+    last_row_to_local(wg_part, loc_mem, inp_last_row);
+    downsweep(wg_part, loc_mem);
     local_to_output(n, loc_mem, output);
 }

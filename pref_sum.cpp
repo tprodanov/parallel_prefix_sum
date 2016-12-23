@@ -5,7 +5,7 @@
 
 #include <CL/cl.hpp>
 
-const size_t work_items = 8;
+const size_t work_groups = 256;
 
 void initialize(cl::Platform& default_platform, cl::Device& default_device) {
     std::vector<cl::Platform> all_platforms;
@@ -27,6 +27,7 @@ void initialize(cl::Platform& default_platform, cl::Device& default_device) {
 
     default_device = all_devices[0];
     std::cerr << "Using device: " << default_device.getInfo<CL_DEVICE_NAME>() << std::endl;
+    std::cerr << "Memory limit: " << default_device.getInfo<CL_DEVICE_LOCAL_MEM_SIZE>() << std::endl;
 }
 
 std::string load_kernel(std::string const& filename) {
@@ -38,6 +39,22 @@ std::string load_kernel(std::string const& filename) {
         kernel_code += tmp + "\n";
     }
     return kernel_code;
+}
+
+void sum_last_row(float* last_row, size_t size) {
+    for (size_t i = 0; i < size; ++i)
+        std::cout << last_row[i] << " ";
+    std::cout << std::endl;
+    
+    for (size_t i = 1; i < size; ++i)
+        last_row[i] += last_row[i - 1];
+    for (size_t i = size; i; --i)
+        last_row[i] = last_row[i - 1];
+    last_row[0] = 0;
+
+    for (size_t i = 0; i < size; ++i)
+        std::cout << last_row[i] << " ";
+    std::cout << std::endl;
 }
 
 int main() {
@@ -64,19 +81,33 @@ int main() {
         fin >> inp_arr[i];
 
     size_t buff_size = sizeof(float) * n;
+    size_t last_row_size = sizeof(float) * work_groups;
     cl::Buffer buffer_in(context, CL_MEM_READ_ONLY, buff_size);
+    cl::Buffer buffer_last_row(context, CL_MEM_READ_WRITE, last_row_size);
     cl::Buffer buffer_out(context, CL_MEM_READ_WRITE, buff_size);
 
     cl::CommandQueue queue(context, default_device);
+    cl::EnqueueArgs eargs(queue, cl::NullRange, work_groups, 1);
+
     queue.enqueueWriteBuffer(buffer_in, CL_TRUE, 0, buff_size, inp_arr);
+    cl::Kernel first_kernel(program, "first_stage");
+    cl::make_kernel<cl::Buffer&, size_t, cl::LocalSpaceArg, cl::Buffer&> first_stage(first_kernel);
 
-    cl::Kernel kernel(program, "prefix_sum");
-    cl::make_kernel<cl::Buffer&, size_t, cl::LocalSpaceArg, cl::Buffer&> prefix_sum(kernel);
+    size_t m = std::max(work_groups, static_cast<size_t>(1 << static_cast<size_t>(std::ceil(std::log2(n)))));
+    size_t local_memory_size = sizeof(float) * ((m / work_groups) * 2 - 1);
 
-    cl::EnqueueArgs eargs(queue, cl::NullRange, work_items, work_items);
-    size_t local_memory_size = sizeof(float) *
-            ((1 << static_cast<size_t>(std::ceil(std::log2(n))) + 1) - work_items);
-    prefix_sum(eargs, buffer_in, n, cl::Local(local_memory_size), buffer_out).wait();
+    std::cerr << "Needed memory: " << local_memory_size << std::endl;
+    first_stage(eargs, buffer_in, n, cl::Local(local_memory_size), buffer_last_row).wait();
+
+    float* last_row = new float[work_groups];
+    queue.enqueueReadBuffer(buffer_last_row, CL_TRUE, 0, last_row_size, last_row);
+
+    sum_last_row(last_row, work_groups);
+    queue.enqueueWriteBuffer(buffer_last_row, CL_TRUE, 0, last_row_size, last_row);
+
+    cl::Kernel second_kernel(program, "second_stage");
+    cl::make_kernel<cl::Buffer&, cl::Buffer&, size_t, cl::LocalSpaceArg, cl::Buffer&> second_stage(second_kernel);
+    second_stage(eargs, buffer_in, buffer_last_row, n, cl::Local(local_memory_size), buffer_out).wait();
 
     float* outp_arr = new float[n];
     queue.enqueueReadBuffer(buffer_out, CL_TRUE, 0, buff_size, outp_arr);
@@ -86,6 +117,7 @@ int main() {
         fout << outp_arr[i] << " ";
     fout << std::endl;
 
+    delete[] last_row;
     delete[] outp_arr;
     delete[] inp_arr;
 }
