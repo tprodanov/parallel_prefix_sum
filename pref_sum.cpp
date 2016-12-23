@@ -5,7 +5,7 @@
 
 #include <CL/cl.hpp>
 
-const size_t work_items = 2;
+const size_t work_items = 8;
 
 void initialize(cl::Platform& default_platform, cl::Device& default_device) {
     std::vector<cl::Platform> all_platforms;
@@ -73,8 +73,9 @@ int main() {
     cl::Kernel kernel(program, "prefix_sum");
     cl::make_kernel<cl::Buffer&, size_t, cl::LocalSpaceArg, cl::Buffer&> prefix_sum(kernel);
 
-    cl::EnqueueArgs eargs(queue, cl::NullRange, cl::NDRange(work_items), cl::NDRange(1));
-    size_t local_memory_size = sizeof(float) * ((1 << static_cast<size_t>(std::ceil(std::log2(work_items))) + 1) - work_items);
+    cl::EnqueueArgs eargs(queue, cl::NullRange, work_items, work_items);
+    size_t local_memory_size = sizeof(float) *
+            ((1 << static_cast<size_t>(std::ceil(std::log2(n))) + 1) - work_items);
     prefix_sum(eargs, buffer_in, n, cl::Local(local_memory_size), buffer_out).wait();
 
     float* outp_arr = new float[n];
