@@ -1,3 +1,5 @@
+#define data_t int
+
 
 size_t calculate_wg_part(size_t n) {
     size_t work_groups = get_global_size(0);
@@ -5,7 +7,7 @@ size_t calculate_wg_part(size_t n) {
     return m / work_groups;
 }
 
-void input_to_local(global float const* input, size_t n, local float* loc_mem) {
+void input_to_local(global data_t const* input, size_t n, local data_t* loc_mem) {
     size_t id = get_global_id(0);
     size_t wg_part = calculate_wg_part(n);
 
@@ -18,7 +20,7 @@ void input_to_local(global float const* input, size_t n, local float* loc_mem) {
     }
 }
 
-void reduce(size_t wg_part, local float* loc_mem) {
+void reduce(size_t wg_part, local data_t* loc_mem) {
     size_t offset = 0;
     while (wg_part > 1) {
         size_t prev_offset = offset;
@@ -31,17 +33,17 @@ void reduce(size_t wg_part, local float* loc_mem) {
     }
 }
 
-void last_row_to_output(size_t wg_part, local float* loc_mem, global float* output) {
+void last_row_to_output(size_t wg_part, local data_t* loc_mem, global data_t* output) {
     size_t id = get_global_id(0);
     output[id] = loc_mem[2 * wg_part - 2];
 }
 
-void last_row_to_local(size_t wg_part, local float* loc_mem, global float const* input) {
+void last_row_to_local(size_t wg_part, local data_t* loc_mem, global data_t const* input) {
     size_t id = get_global_id(0);
     loc_mem[2 * wg_part - 2] = input[id];;
 }
 
-void downsweep(size_t wg_part, local float* loc_mem) {
+void downsweep(size_t wg_part, local data_t* loc_mem) {
     size_t id = get_global_id(0);
     size_t chunk = 1;
     size_t offset = 2 * wg_part - 2;
@@ -58,7 +60,7 @@ void downsweep(size_t wg_part, local float* loc_mem) {
     }
 }
 
-void local_to_output(size_t n, local float* loc_mem, global float* output) {
+void local_to_output(size_t n, local data_t* loc_mem, global data_t* output) {
     size_t id = get_global_id(0);
     size_t wg_part = calculate_wg_part(n);
 
@@ -67,16 +69,16 @@ void local_to_output(size_t n, local float* loc_mem, global float* output) {
     }
 }
 
-void kernel first_stage(global float const* input, size_t n,
-                        local float* loc_mem, global float* outp_last_row) {
+void kernel first_stage(global data_t const* input, size_t n,
+                        local data_t* loc_mem, global data_t* outp_last_row) {
     input_to_local(input, n, loc_mem);
     size_t wg_part = calculate_wg_part(n);
     reduce(wg_part, loc_mem);
     last_row_to_output(wg_part, loc_mem, outp_last_row);
 }
 
-void kernel second_stage(global float const* input, global float const* inp_last_row,
-                         size_t n, local float* loc_mem, global float* output) {
+void kernel second_stage(global data_t const* input, global data_t const* inp_last_row,
+                         size_t n, local data_t* loc_mem, global data_t* output) {
     input_to_local(input, n, loc_mem);
     size_t wg_part = calculate_wg_part(n);
     reduce(wg_part, loc_mem);
